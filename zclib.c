@@ -116,6 +116,10 @@ int get_cpus(void)
 #define SYS_sched_setaffinity 222
 #elif defined(__i386__)
 #define SYS_sched_setaffinity 241
+#elif defined(__sh__)
+#define SYS_sched_setaffinity 241
+#elif defined(__arm__)
+#define SYS_sched_setaffinity 241
 #else
 #warning please define SYS_sched_setaffinity
 #endif

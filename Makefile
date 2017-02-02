@@ -1,5 +1,3 @@
-
-CC	=	gcc
 CFLAGS	+= 	-g -O -Wall -Wshadow
 ALL	=	zcc zcs cyclesoak run_rr run_on_cpu udpspam dumpdb
 
@@ -25,3 +23,5 @@ zcc.o zcs.o zclib.o: zc.h
 clean:
 	$(RM) *.o $(ALL) counts_per_sec
 
+install:
+	cp cyclesoak $(BINDIR)
