@@ -44,7 +44,7 @@ static double		d_counts_per_sec;
 static 	char		*busyloop_buf;
 static unsigned long	busyloop_size = 1000000;
 static unsigned long	*busyloop_progress;
-static int		period_secs = 1;
+static int		period_millisecs = 1000;
 static int		rw_ratio = 5;
 static int		cacheline_size = 32;
 static unsigned long	sum;
@@ -171,12 +171,18 @@ static void itimer(int sig)
 static void prep_cyclesoak(void)
 {
 	struct itimerval it = {
-		{ period_secs, 0 },
+		{ 0, period_millisecs * 1000},
 		{ 1, 0 },
 	};
 	FILE *f;
 	char buf[80];
 	int cpu;
+
+	/* Cope with user-defined periods of > 1s */
+	if (it.it_interval.tv_usec >= 1000000) {
+		it.it_interval.tv_sec = it.it_interval.tv_usec / 1000000;
+		it.it_interval.tv_usec = it.it_interval.tv_usec % 1000000;
+	}
 
 	if (!do_calibrate) {
 		f = fopen(CPS_FILE, "r");
@@ -263,12 +269,13 @@ static void exit_handler(void)
 
 static void usage(void)
 {
-	fprintf(stderr,	"Usage: cyclesoak [-BCdh] [-N nr_cpus] [-p period]\n"
+	fprintf(stderr,	"Usage: cyclesoak [-BCdhm] [-N nr_cpus] [-p period]\n"
 			"\n"
 			"  -B:      Generate per-CPU statistics\n"
 			"  -C:      Calibrate CPU load\n"
 			"  -d:      Debug (more d's, more fun)\n"
 			"  -h:      This message\n"
+			"  -m:      Set the load sampling period (milliseconds)\n"
 			"  -N:      Tell cyclesoak how many CPUs you have\n"
 			"  -p:      Set the load sampling period (seconds)\n"
 			"  -D:      Store statistics in a dbm file\n"
@@ -280,8 +287,9 @@ int main(int argc, char *argv[])
 {
 	int c;
 	nr_cpus = -1;
+	int set_secs = 0, set_millisecs = 0;
 
-	while ((c = getopt(argc, argv, "BCdhN:p:D:")) != -1) {
+	while ((c = getopt(argc, argv, "BCdhmN:p:D:")) != -1) {
 		switch (c) {
 		case 'B':
 			do_bonding++;
@@ -295,11 +303,16 @@ int main(int argc, char *argv[])
 		case 'h':
 			usage();
 			break;
+		case 'm':
+			period_millisecs = strtol(optarg, NULL, 10);
+			set_millisecs = 1;
+			break;
 		case 'N':
 			nr_cpus = strtol(optarg, NULL, 10);
 			break;
 		case 'p':
-			period_secs = strtol(optarg, NULL, 10);
+			period_millisecs = strtol(optarg, NULL, 10) * 1000;
+			set_secs = 1;
 			break;
 		case 'D':
 			use_db++;
@@ -309,6 +322,11 @@ int main(int argc, char *argv[])
 			usage();
 			break;
 		}
+	}
+
+	if (set_secs && set_millisecs) {
+		printf("Error: cannot specify period in both seconds (-p) and milliseconds (-m)\n");
+		exit(1);
 	}
 
 	if (nr_cpus == -1) {
