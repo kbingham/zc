@@ -289,6 +289,9 @@ int main(int argc, char *argv[])
 	nr_cpus = -1;
 	int set_secs = 0, set_millisecs = 0;
 
+	/* Allow the output to be piped to another process */
+	setlinebuf(stdout);
+
 	while ((c = getopt(argc, argv, "BCdhmN:p:D:")) != -1) {
 		switch (c) {
 		case 'B':
