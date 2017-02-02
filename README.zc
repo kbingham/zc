@@ -1,0 +1,374 @@
+
+ZC - a tool for measuring the efficiency of Linux TCP transmission
+Andrew Morton <andrewm@uow.edu.au>                     27 Jan 2001
+==================================================================
+
+
+Overview
+========
+
+ZC consists of a client (zcc) and a server (zcs) and a CPU load
+measuring tool (cyclesoak).  The client sends a bunch of files to the
+server.  The server monitors the throughput (kbytes/sec).
+
+The CPU load measurement tool `cyclesoak' is very accurate.
+
+The client can also use read()/write() or read()/send() for
+transmission rather than sendfile(), so these can be compared.
+
+
+Results
+=======
+
+
+The kernels which were tested were 2.4.1-pre10 with and without the
+zerocopy patch.  We only look at client load (the TCP sender).
+
+In all tests the link throughput was 11.5 mbytes/sec at all times
+(saturated 100baseT) unless otherwise noted.
+
+The client (the thing which sends data) is a dual 500MHz PII with a
+3c905C.
+
+For the write() and send() tests, the chunk size was 64 kbytes.
+
+The workload was 63 files with an average length of 350 kbytes.
+
+CPU figures are also given for the same machine receiving the 11.5
+mbyte/sec stream.  It is doing 16 kbyte read()s.
+
+                                                    3c905C 3c905C  3c905C 3c905C 3c905C    eepro100  eepro100  eepro100
+                                                     CPU   affine   ints  rx pps tx pps      MMIO     I/O ops   ints
+       
+    2.4.1-pre10+zerocopy, sendfile():                9.6%           4395   4106   8146      15.3%
+    2.4.1-pre10+zerocopy, send():                   24.1%           4449   4163   8196      20.2%
+    2.4.1-pre10+zerocopy, receiving:                18.7%           12332  8156   4189      17.6%
+
+    2.4.1-pre10+zerocopy, sendfile(), no xsum/SG:   16.2%                                  (15.3%)
+    2.4.1-pre10+zerocopy, send(), no xsum/SG:       21.5%                                  (20.2%)
+
+
+
+    2.4.1-pre10-vanilla, using sendfile():          17.1%  17.9%    5729   5296   8214      16.1%     16.8%
+    2.4.1-pre10-vanilla, using send():              21.1%           4629   4152   8191      20.3%     20.6%     6310
+    2.4.1-pre10-vanilla, receiving:                 18.3%          12333   8156   4188      17.1%     18.2%    12335
+
+
+Bearing in mind that a large amount of the load is in the device
+driver, the zerocopy patch makes a large improvement in sendfile
+efficiency.  But read() and send() performance is decreased by 10% -
+more than this if you factor out the constant device driver overhead.
+
+
+TCP_CORK makes no difference.  The files being sent are much larger
+than a single frame.  If you force small writes with `zcc -S -b 64'
+then TCP_CORK saves some CPU at the receiver, but total throughput
+falls a little.  More work needed here.
+
+
+When using TCP_CORK on send(), packets-per-second remained unchanged. 
+This is due to the large size of the writes, and is due to the
+networking stack's ability to coalesce data from separate calls to
+sys_send() into single frames.
+
+
+Without the zc patch, there is a significant increase in the number of
+Rx packets (acks, persumably) when data is sent using sendfile() as
+opposed to when the same data is sent with send().
+
+  Workload: 62 files, average size 350k.
+            sendfile() tries to send the entire file in one hit
+            send() breaks it up into 64kbyte chunks.
+
+When the zerocopy patch is applied, the Rx packet rate during
+sendfile() is the same as the rate during send().
+
+
+eepro100 generates more interrupts doing TCP Tx, but not TCP Rx.  The
+driver doesn't do Tx interrupt mitigation.
+
+Changing eepro100 to use IO operations instead of MMIO slows down this
+dual 500MHz machine by less than one percent at 100 mbps.
+
+
+Conclusions:
+
+  For a NIC which cannot do scatter/gather/checksums, the zerocopy
+  patch makes no change in throughput in all case.
+
+  For a NIC which can do scatter/gather/checksums, sendfile()
+  efficiency is improved by 40% and send() efficiency is decreased by
+  10%.  The increase and decrease caused by the zerocopy patch will in
+  fact be significantly larger than these two figures, because the
+  measurements here include a constant base load caused by the device
+  driver.
+
+
+send() results, against transfer buffer size
+============================================
+
+                  2.4.1-pre10+zc    2.4.1-pre10+zc     2.4.1-pre10+zc
+                   SG enabled         SG enabled        SG disabled
+                    MAXPGS=8           MAXPGS=1
+
+256                  34.9%               35.3%            32.3%
+512                  28.7%               29.0%            26.6%
+1024                 25.5%               25.8%            24.1%
+2048                 21.3%               21.6%            20.2%
+4096                 20.0%               20.2%            19.0%
+8192                 19.1%               19.4%            18.0%
+16384                19.7%               20.0%            18.7%
+32768                21.0%               21.6%            20.0%
+65536                24.3%               24.8%            22.2%
+
+
+NFS/UDP client results
+======================
+
+Reading a 100 meg file across 100baseT.  The file is fully cached on
+the server.  The client is the above machine.  You need to unmount the
+server between runs to avoid client-side caching.
+
+The server is mounted with various rsize and wsize options.
+
+  Kernel           rsize wsize   mbyte/sec     CPU
+
+  2.4.1-pre10+zc   1024  1024     2.4         10.3%
+  2.4.1-pre10+zc   2048  2048     3.7         11.4%
+  2.4.1-pre10+zc   4096  4096     10.1        29.0%
+  2.4.1-pre10+zc   8199  8192     11.9        28.2%
+  2.4.1-pre10+zc  16384 16384     11.9        28.2%
+
+  2.4.1-pre10      1024  1024      2.4         9.7%
+  2.4.1-pre10      2048  2048      3.7        11.8%
+  2.4.1-pre10      4096  4096     10.7        33.6%
+  2.4.1-pre10      8199  8192     11.9        29.5%
+  2.4.1-pre10     16384 16384     11.9        29.2%
+
+Small diff at 8192.
+
+
+NFS/UDP server results
+======================
+
+Reading a 100 meg file across 100baseT.  The file is fully cached on
+the server.  The server is the above machine.
+
+  Kernel           rsize wsize   mbyte/sec     CPU
+
+  2.4.1-pre10+zc   1024  1024      2.6        19.1%
+  2.4.1-pre10+zc   2048  2048      3.9        18.8%
+  2.4.1-pre10+zc   4096  4096     10.0        34.5%
+  2.4.1-pre10+zc   8199  8192     11.8        28.9%
+  2.4.1-pre10+zc  16384 16384     11.8        29.0%
+
+  2.4.1-pre10      1024  1024      2.6        18.5%
+  2.4.1-pre10      2048  2048      3.9        18.6%
+  2.4.1-pre10      4096  4096     10.9        33.8%
+  2.4.1-pre10      8199  8192     11.8        29.0%
+  2.4.1-pre10     16384 16384     11.8        29.0%
+
+No diff.
+
+Local networking
+================
+
+./zcs
+./zcc -s 0 /usr/local/bin/* -n100
+mount -t nfs localhost:/usr/src /mnm -o rsize=8192,wsize=8192
+
+                                sendfile()     send(8k)   NFS
+
+No explicit bonding
+  2.4.1:                          66600        70000     25600
+  2.4.1-zc:                      208000        69000     25000
+
+sems:                             69000        70000     25200
+                                  71800
+
+Bond client and server to separate CPUs
+  2.4.1:                          66700        68000     27800
+  2.4.1-zc:                      213047        66000     25700
+
+Bond client and server to same CPU:
+  2.4.1:                          56000        57000     23300
+  2.4.1-zc:                      176000        55000     22100
+
+ttcp-sf Results
+===============
+
+Jamal Hadi Salim has taught ttcp to use sendfile.  See
+http://www.cyberus.ca/~hadi/ttcp-sf.tar.gz
+
+Using the same machine as above, and the following commands:
+
+Sender:    ./ttcp-sf -t -c -l 32768 -v receiver_host
+Receiver:  ./ttcp-sf -c -r -l 32768 -v sender_host
+
+                                                        CPU
+
+    2.4.1-pre10-zerocopy, sending with ttcp-sf:        10.5%
+    2.4.1-pre10-zerocopy, receiving with ttcp-sf:      16.1%
+
+    2.4.1-pre10-vanilla, sending with ttcp-sf:         18.5%
+    2.4.1-pre10-vanilla, receiving with ttcp-sf:       16.0%
+
+
+cyclesoak
+=========
+
+`cyclesoak' calculates CPU load by a subtractive method: a background
+cycle-soaking task is executed on all CPUs and `cyclesoak' measures how
+much the throughput of the background tasks is degraded by running the
+traffic.
+
+This means that ALL effects of networking (or other userspace + kernel
+activity) are measured - interrupt load, softirq handling, memory
+bandwidth usage, etc.  This is much more accurate than using Linux
+process accounting.
+
+Before `cyclesoak' can be used, it must be calibrated with the
+`cyclesoak -C -N nr_cpus' option.  You need to tell `cyclesoak' how
+many CPUs you have each time it is used.  If you get this wrong during
+a benchmark run, you may get wrong results.
+
+`cyclesoak' sets the nice level of its soaker as low as possible.  But
+it is still possible for `cyclesoak' to steal CPU from the thing which
+you are trying to measure.  For this reason it may be necessary to run
+`zcc' or `zcs' with "Round Robin" scheduling policy.  This will ensure
+that `zcc' or `zcs' get all the CPU they need, and ensures that CPU
+load measurements are exact.
+
+In practice, SCHED_RR is not needed by `zcc' and `zcs' because they can
+get all the foreground CPU they need.
+
+Be careful using SCHED_RR processes! You can lock your system if you
+run a SCHED_RR process which doesn't terminate.
+
+You should always run these tools on otherwise-unloaded systems.
+
+Usage: run_rr
+=============
+
+`run_rr' runs another command with SCHED_RR policy.  It requires root
+permissions.  When run with no arguments, `run_rr' starts an
+interactive shell which has SCHED_RR policy.  All the shell's children
+will also have SCHED_RR policy.
+
+Usage: cyclesoak
+================
+
+This is the CPU load monitor.
+
+Usage: cyclesoak [-Cdh] [-N nr_cpus] [-p period]
+
+  -C:      Calibrate CPU load
+
+           This option must be used (on an unloaded system)
+           before `cyclesoak' can be used.
+
+           It sets a baseline for the throughput of the
+           cycle-soaker tasks and writes it to "./counts_per_sec".
+
+  -d:      Debug (more d's, more fun)
+
+  -h:      This message
+
+  -N:      Tell cyclesoak how many CPUs you have
+
+           This is compulsory when running `cyclesoak' to
+           measure load or when using `-C'.
+
+  -p:      Set the load sampling period (seconds)
+
+  -C:      Calibrate CPU load
+
+
+Usage: zcs
+==========
+
+zcs is the server.  zcs listens on a port for connections from zcc.  It
+receives the files which zcc sends.
+
+Usage: zcs [-dh] [-B cpu] [-p port] [-i input_bufsize] [-o output_bufsize]
+
+  -B:      Bond zcs to the indicated CPU.  Requires root permissions.
+
+  -d:      Debug (more d's, more fun)
+
+  -h:      This message
+
+  -p:      TCP port to listen on
+
+           Set the port on which `zcs' listens for
+           connections.  Default is 2222.
+
+  -i:      Set TCP receive buffer size (bytes)
+
+           This option allows you to alter the size of thr TCP receive
+           buffer.  I haven't played with this.  If you want to set it
+           really big or really small you'll need to alter
+           /proc/sys/net/rmem_max
+
+  -o:      Set TCP send buffer size (bytes)
+
+           This option allows you to alter the size of the
+           TCP transmit buffer.  I haven't played with this.  If you
+           want to set it really big or really small you'll need to
+           alter /proc/sys/net/wmem_max
+
+Usage: zcc
+==========
+
+zcc is the client.  It sends a bunch of files to `zcs'.  Of course, you
+don't want to just measure the throughput of your disks, so you should
+send the files multiple times using the `-n' option.  Make sure the
+entire working set fits into main memory, and ignore the initial
+throughput and CPU load results.
+
+
+
+Usage: zcc [-cCdkhSw] [-b buffer_size] [-B cpu] [-i input_bufsize] [-o output_bufsize]
+           [-n n_loops] [-N nr_cpus] [-p port] -s server filename[s]
+
+  -b:      For read()/write() or read()/send() mode, set the
+           amount of memory which is used to buffer transfers, in
+           bytes.  `zcc' reads this many bytes from disk and then
+           writes them to the network and then does this again for each
+           file.
+
+  -B:      Bond zcc to the indicated CPU.  Requires root permissions.
+
+  -d:      Debug (more d's, more fun)
+
+  -h:      This message
+
+  -k:      Use the TCP_CORK option on the outgoing connection.
+
+  -i:      Set TCP receive buffer size (bytes)
+  -o:      Set TCP send buffer size (bytes)
+
+           Same as with zcs
+
+  -n:      Send the fileset this many times
+
+           Loop across the files this many times.
+
+  -p:      TCP port to connect to
+
+           Should match the option given to `zcs'.  Default is 2222.
+
+  -s:      Server to connect to
+
+           A hostname or an IP address.
+
+  -S:      Don't use sendfile: use read/send instead
+
+           Use read() and write() or read() and send() into
+           a userspace buffer, rather than sendfile().
+
+  -w:      When using `-S', use write() to write to the socket,
+           rather than send().
+
+  -N:      Tell zcc how many CPUs you have
+

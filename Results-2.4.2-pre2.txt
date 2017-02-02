@@ -1,0 +1,128 @@
+
+OK, it's 10 Feb, and we have kernel 2.4.2-pre2 and a new zerocopy
+patch which uses csum_and_copy_from_user
+
+
+                                     CPU
+
+2.4.2-pre2+zc, sendfile:            10.7%
+2.4.2-pre2+zc, send(8k):            20.9%
+2.4.2-pre2+zc+no-SG, sendfile:      17.8%
+2.4.2-pre2+zc+no-SG, send(8k):      17.9%
+
+Concentrate on send(8k):
+
+- Use page alignment                19.5%
+- Force copy_from_user              20.3%
+- Force csum_copy                   20.1%
+- Select intelligently              19.8%
+
+
+Hacked tcp_sendmsg:
+
+send(8k), no SG                     18.2%
+send(8k), SG, csum copy             20.3%
+send(8k), SG, copy_from_user        20.6%
+send(8k), SG, auto-best-copy        20.5%   (err...)
+send(8k), SG, page alignment        20.0%
+
+
+
+Profile.  Ten seconds, 10x profile increment - cyclesoak running
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+send(8k), no SG                     18.2%
+=========================================
+
+c0224734 tcp_transmit_skb                             47   0.0347
+c01127dc schedule                                     54   0.0340
+c021599c ip_output                                    54   0.1688
+c010a768 handle_IRQ_event                             55   0.4583
+c02041ec skb_release_data                             60   0.5357
+c0211068 ip_route_input                               69   0.1938
+c022abac tcp_v4_rcv                                   75   0.0470
+c0215adc ip_queue_xmit                                76   0.0571
+c0204410 skb_clone                                    85   0.1986
+c0219a54 tcp_sendmsg_copy                             99   0.0270
+c02209fc tcp_clean_rtx_queue                         101   0.1153
+c02042c4 __kfree_skb                                 113   0.3404
+c024a3cc csum_partial_copy_generic                   436   1.7581
+c0125580 file_read_actor                             548   6.5238
+00000000 total                                      2874   0.0021
+
+send(8k), SG, csum copy             20.3%
+=========================================
+
+c0211068 ip_route_input                               47   0.1320
+c011be60 del_timer                                    49   0.6806
+c021599c ip_output                                    49   0.1531
+c010a768 handle_IRQ_event                             56   0.4667
+c022abac tcp_v4_rcv                                   66   0.0414
+c02041ec skb_release_data                             69   0.6161
+c0215adc ip_queue_xmit                                69   0.0518
+c0204410 skb_clone                                    70   0.1636
+c02042c4 __kfree_skb                                  96   0.2892
+c02209fc tcp_clean_rtx_queue                         100   0.1142
+c021b6fc tcp_sendmsg                                 109   0.0439
+c021a8ac do_tcp_sendpages                            152   0.0440          161
+c024a3cc csum_partial_copy_generic                   520   2.0968          84
+c0125580 file_read_actor                             615   7.3214          67
+00000000 total                                      3222   0.0024          348
+
+
+
+send(8k), SG, csum copy, skbuff_cache 19.2%
+===========================================
+
+c01127dc schedule                                     45   0.0283
+c0215cbc ip_output                                    46   0.1437
+c011bed0 del_timer                                    55   0.7639
+c010a768 handle_IRQ_event                             56   0.4667
+c020471c skb_clone                                    57   0.1295
+c0215dfc ip_queue_xmit                                57   0.0428
+c02044cc skb_release_data                             60   0.4286
+c022aecc tcp_v4_rcv                                   78   0.0489
+c021ba1c tcp_sendmsg                                  82   0.0330
+c02045c4 __kfree_skb                                 102   0.2965
+c0220d1c tcp_clean_rtx_queue                         106   0.1210
+c021abcc do_tcp_sendpages                            119   0.0345
+c024a6ec csum_partial_copy_generic                   524   2.1129
+c01255f0 file_read_actor                             607   7.2262
+00000000 total                                      3076   0.0023
+
+send(8k), SG, csum copy, skbuff_cache 18.8%
+===========================================
+
+c0215cbc ip_output                                    49   0.1531
+c0224a54 tcp_transmit_skb                             49   0.0361
+c0129e18 kmem_cache_alloc                             51   0.2713
+c021ba1c tcp_sendmsg                                  53   0.0213
+c022aecc tcp_v4_rcv                                   61   0.0382
+c0215dfc ip_queue_xmit                                64   0.0480
+c010a768 handle_IRQ_event                             68   0.5667
+c02044cc skb_release_data                             68   0.4857
+c0220d1c tcp_clean_rtx_queue                          83   0.0947
+c020471c skb_clone                                    93   0.2114
+c02045c4 __kfree_skb                                 117   0.3401
+c021abcc do_tcp_sendpages                            117   0.0339
+c024aa18 __strncpy_from_user                         500  13.8889
+c01255f0 file_read_actor                             576   6.8571
+00000000 total                                      3033   0.0022
+
+
+Another take
+============
+
+send(8k), no SG                                             19.2%
+send(8k), SG, csum_copy                                     20.3%
+send(8k), SG, copy_from_user                                20.9%
+send(8k), SG, choose copy                                   20.6%
+send(8k), SG, page-aligned, choose copy                     20.3%
+send(8k), SG, page-aligned, csum_copy                       20.2%
+send(8k), csum_copy, skbuff_cache                           20.5%     (huh?)                           
+send(8k), csum_copy, skbuff_cache, page-aligned             20.2%
+send(8k), copy_from_user, skbuff_cache, page-aligned        20.2%
+
+
+
+

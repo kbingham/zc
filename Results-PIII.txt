@@ -1,0 +1,14 @@
+650MHz Mobile PIII (Coppermine)
+
+(Don't use CONFIG_NETFILTER_DEBUG.  It calls (ip_queue_xmit nf_hook_slow skb_linearize)
+even when nothing's turned on.
+
+2.4.2-pre2, sendfile                     29.7%
+2.4.2-pre2, send(8k)                     28.3%
+2.4.2-pre2, send(128k)                   32.4%
+
+2.4.2-pre2-zc, sendfile                  18.8%
+2.4.2-pre2-zc, send(8k)
+2.4.2-pre2-zc, send(128k)
+
+
