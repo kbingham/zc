@@ -89,28 +89,6 @@ int get_mhz(void)
 	}
 }
 
-int get_cpus(void)
-{
-	int num = 0;
-
-	FILE *f = fopen("/proc/cpuinfo", "r");
-	if (f == 0) {
-		perror("can't open /proc/cpuinfo\n");
-		exit(1);
-	}
-
-	for ( ; ; ) {
-		char buf[1000];
-
-		if (fgets(buf, sizeof(buf), f) == NULL) {
-			fclose(f);
-			return num;
-		}
-		if (!strncmp(buf, "processor", 9))
-			num++;
-	}
-}
-
 #ifndef SYS_sched_setaffinity
 #ifdef __powerpc__
 #define SYS_sched_setaffinity 222

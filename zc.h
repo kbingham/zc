@@ -29,7 +29,6 @@
 extern void set_sndbuf(int sock, int size);
 extern void set_rcvbuf(int sock, int size);
 extern int get_mhz(void);
-extern int get_cpus(void);
 extern void bond_to_cpus(unsigned long cpu);
 extern void bond_to_cpu(unsigned long cpu);
 

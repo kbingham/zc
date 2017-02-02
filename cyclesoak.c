@@ -330,7 +330,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (nr_cpus == -1) {
-		nr_cpus = get_cpus();
+		nr_cpus = sysconf(_SC_NPROCESSORS_ONLN);
 		printf("using %d CPUs\n", nr_cpus);
 	}
 
